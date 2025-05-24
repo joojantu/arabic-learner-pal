@@ -135,7 +135,8 @@ export const geminiService = {
         });
       }
       
-      const response: GenerateContentResponse = await ai.models.generateContent({
+      const model = ai.getGenerativeModel({ model: GEMINI_MODEL_NAME });
+const response = await model.generateContent(prompt);
         model: GEMINI_MODEL_NAME,
         contents: { parts: contentParts }, // Use parts for multimodal input
         config: {
