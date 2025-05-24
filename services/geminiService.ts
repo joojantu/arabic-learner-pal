@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, GenerateContentResponse, Part } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { LessonPlan, UploadedFile } from '../types';
 import { GEMINI_MODEL_NAME, MISSING_API_KEY_MSG } from '../constants';
 
@@ -15,7 +15,7 @@ let ai: GoogleGenAI | null = null;
 
 if (API_KEY && API_KEY !== MISSING_API_KEY_MSG) { // Check if API_KEY is provided and not the placeholder
   try {
-    ai = new GoogleGenAI({ apiKey: API_KEY });
+    ai = new GoogleGenerativeAI(API_KEY);
   } catch (error) {
     console.error("Failed to initialize GoogleGenAI. Ensure API_KEY is valid.", error);
     // ai remains null, subsequent calls will fail gracefully.
