@@ -1,0 +1,6 @@
+{
+  "name": "Arabic Learner PAL (Rebuilt)",
+  "description": "A Duolingo-style app to help an 11-year-old learn spoken Arabic for their school test, with customizable topics. Powered by Gemini API.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
