@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { AppView, LessonPlan } from './types';
+import { AppView, LessonPlan, UploadedFile } from './types';
 import TopicInputForm from './components/TopicInputForm';
 import LessonView from './components/LessonView';
 import QuizView from './components/QuizView';
@@ -32,7 +32,7 @@ const App: React.FC = () => {
   }, []);
 
 
-  const handleTopicsSubmit = useCallback(async (topics: string) => {
+  const handleTopicsSubmit = useCallback(async (topics: string, file?: UploadedFile) => {
     if (!geminiService.isApiKeyConfigured()) {
       setCurrentView('apiKeyMissing');
       return;
@@ -41,7 +41,7 @@ const App: React.FC = () => {
     setError(null);
     setCurrentView('loading');
     try {
-      const plan = await geminiService.generateLessonPlan(topics);
+      const plan = await geminiService.generateLessonPlan(topics, file);
       setLessonPlan(plan);
       setCurrentView('lesson');
     } catch (err) {

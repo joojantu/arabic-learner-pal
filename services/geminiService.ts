@@ -1,8 +1,14 @@
 
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { LessonPlan } from '../types';
+import { GoogleGenAI, GenerateContentResponse, Part } from "@google/genai";
+import { LessonPlan, UploadedFile } from '../types';
 import { GEMINI_MODEL_NAME, MISSING_API_KEY_MSG } from '../constants';
 
+// The API_KEY is sourced directly from the environment variable 'process.env.API_KEY'.
+// In valid JavaScript, 'const API_KEY = process.env.API_KEY;' correctly initializes API_KEY.
+// If 'process.env.API_KEY' is undefined, API_KEY will be undefined. This is a valid initialization.
+// A "SyntaxError: Missing initializer in const declaration" on this line implies that 'process.env.API_KEY'
+// is being improperly substituted by a build tool or pre-processor, resulting in syntactically invalid code
+// (e.g., 'const API_KEY = ;'). This would be an environmental issue.
 const API_KEY = process.env.API_KEY;
 
 let ai: GoogleGenAI | null = null;
@@ -15,20 +21,33 @@ if (API_KEY && API_KEY !== MISSING_API_KEY_MSG) { // Check if API_KEY is provide
     // ai remains null, subsequent calls will fail gracefully.
   }
 } else {
-  console.warn(`API_KEY environment variable is not set or is set to the placeholder value. Gemini API calls will not be made. Current value: ${API_KEY === MISSING_API_KEY_MSG ? "Placeholder (Not configured)" : "Not set"}`);
+  console.warn(`API_KEY environment variable is not set or is set to the placeholder value. Gemini API calls will not be made. Current value: ${API_KEY === MISSING_API_KEY_MSG ? "Placeholder (Not configured)" : API_KEY === undefined ? "Not set (undefined)" : "Not set (empty or other falsy value)"}`);
 }
 
 
-const generateLessonPlanPrompt = (topics: string): string => `
-You are an expert Arabic language tutor creating engaging educational content for an 11-year-old beginner.
-The goal is to teach spoken Arabic relevant to their school test, based on the topics they provide.
+const generateLessonPlanPrompt = (topics: string, file?: UploadedFile): string => {
+  let fileContextInstruction = "";
+  if (file) {
+    fileContextInstruction = `
+The user has also uploaded a file named "${file.name}" (MIME type: ${file.mimeType}). 
+This file contains material relevant to the lesson. 
+Please analyze the content of this file to identify and extract key topics, vocabulary, and phrases suitable for an 11-year-old beginner learning Arabic.
+Prioritize content from the uploaded file if it seems comprehensive for the lesson's scope.
+`;
+  }
 
-Generate a lesson plan focused on these topics: "${topics}".
+  return `
+You are an expert Arabic language tutor creating engaging educational content for an 11-year-old beginner.
+The goal is to teach spoken Arabic relevant to their school test.
+
+${fileContextInstruction}
+
+Based on the information from the uploaded file (if any) and the following user-specified topics: "${topics || "None specified, rely on file content or general beginner topics"}", generate a lesson plan.
 
 The lesson plan MUST be in a valid JSON format. Do NOT include any markdown formatting like \`\`\`json or \`\`\` around the JSON output.
 The JSON structure MUST be as follows:
 {
-  "title": "Lesson: [A catchy and relevant title derived from the topics, e.g., 'Mastering Greetings & Introductions']",
+  "title": "Lesson: [A catchy and relevant title derived from the topics/file content, e.g., 'Mastering Greetings & Introductions']",
   "vocabulary": [
     {
       "arabic": "[ARABIC_WORD_OR_PHRASE_WITH_DIACRITICS_IF_POSSIBLE]",
@@ -36,7 +55,7 @@ The JSON structure MUST be as follows:
       "transliteration": "[SIMPLE_CLEAR_PHONETIC_TRANSLITERATION_FOR_AN_ENGLISH_SPEAKER]",
       "audioSrc": "[EXACT_ARABIC_WORD_OR_PHRASE_FOR_TTS_MATCHING_ARABIC_FIELD]"
     } 
-    // Aim for 5-8 diverse and useful vocabulary items related to the topics.
+    // Aim for 5-8 diverse and useful vocabulary items related to the topics/file.
   ],
   "phrases": [
     {
@@ -45,7 +64,7 @@ The JSON structure MUST be as follows:
       "transliteration": "[SIMPLE_CLEAR_PHONETIC_TRANSLITERATION_OF_THE_PHRASE]",
       "audioSrc": "[EXACT_ARABIC_PHRASE_FOR_TTS_MATCHING_ARABIC_FIELD]"
     }
-    // Aim for 3-5 practical phrases using the vocabulary or related to the topics.
+    // Aim for 3-5 practical phrases using the vocabulary or related to the topics/file.
   ],
   "quiz": [
     // Include a mix of the 3 question types below. Aim for 5-7 total quiz questions.
@@ -93,41 +112,48 @@ Important Guidelines:
 - Content must be age-appropriate for an 11-year-old.
 - Focus on Modern Standard Arabic (MSA) unless the topics specifically imply a dialect (prefer MSA for general learning).
 - Ensure the quiz questions are diverse and cover different aspects of the vocabulary and phrases.
-- Double-check that `correctAnswer` values in quiz questions perfectly match one of the provided options (textually).
+- Double-check that \`correctAnswer\` values in quiz questions perfectly match one of the provided options (textually).
 `;
+}
 
 export const geminiService = {
-  generateLessonPlan: async (topics: string): Promise<LessonPlan> => {
+  generateLessonPlan: async (topics: string, file?: UploadedFile): Promise<LessonPlan> => {
     if (!ai) {
       throw new Error("Gemini API client is not initialized. Is the API_KEY configured correctly?");
     }
     try {
-      const prompt = generateLessonPlanPrompt(topics);
-      console.log("Generating lesson plan with prompt:", prompt); // For debugging
+      const promptText = generateLessonPlanPrompt(topics, file);
+      console.log("Generating lesson plan with topics:", topics, "and file:", file?.name);
 
+      const contentParts: Part[] = [{ text: promptText }];
+      if (file) {
+        contentParts.push({
+          inlineData: {
+            mimeType: file.mimeType,
+            data: file.base64Data,
+          },
+        });
+      }
+      
       const response: GenerateContentResponse = await ai.models.generateContent({
         model: GEMINI_MODEL_NAME,
-        contents: prompt,
+        contents: { parts: contentParts }, // Use parts for multimodal input
         config: {
           responseMimeType: "application/json",
-          temperature: 0.6, // Slightly lower for more predictable structure
-          // thinkingConfig: { thinkingBudget: 0 } // Consider for lower latency if needed, but might reduce quality. Default is usually fine.
+          temperature: 0.6, 
         },
       });
       
       let jsonStr = response.text.trim();
       
-      // Remove potential markdown fences (```json ... ``` or ``` ... ```)
       const fenceRegex = /^```(?:json)?\s*\n?(.*?)\n?\s*```$/s;
       const match = jsonStr.match(fenceRegex);
       if (match && match[1]) {
         jsonStr = match[1].trim();
       }
 
-      // Attempt to parse the JSON
       const lessonPlan = JSON.parse(jsonStr) as LessonPlan;
 
-      // Basic validation of the parsed structure
       if (!lessonPlan || typeof lessonPlan !== 'object') {
         throw new Error("API response is not a valid object.");
       }
@@ -135,12 +161,10 @@ export const geminiService = {
         console.error("Invalid lesson plan structure received:", lessonPlan);
         throw new Error("Invalid lesson plan structure: missing required fields (title, vocabulary, phrases, or quiz).");
       }
-      // Add more specific validations as needed
       lessonPlan.quiz.forEach((q, i) => {
         if (!q.type || !q.questionText || !q.options || !q.correctAnswer) {
             throw new Error(`Quiz question at index ${i} is malformed.`);
         }
-        // Ensure correctAnswer is one of the options
         let optionsTexts: string[] = [];
         if (q.type === 'english_to_arabic_mc') {
             optionsTexts = q.options.map(opt => opt.arabic);
@@ -148,20 +172,17 @@ export const geminiService = {
             optionsTexts = q.options as string[];
         }
         if (!optionsTexts.includes(q.correctAnswer)) {
-            console.warn(`Correct answer "${q.correctAnswer}" for question ${i+1} not found in options: ${optionsTexts.join(', ')}`);
-            // Potentially attempt to fix or throw error
-            // For now, we'll allow it but log a warning. Ideally, the prompt should prevent this.
+            console.warn(`Correct answer "${q.correctAnswer}" for quiz question ${i+1} ('${q.questionText}') not found in options: [${optionsTexts.join(', ')}]. This might indicate an issue with the generated lesson plan.`);
         }
       });
-
 
       return lessonPlan;
     } catch (error) {
       console.error("Error generating lesson plan with Gemini:", error);
-      if (error instanceof SyntaxError) { // JSON parsing error
+      if (error instanceof SyntaxError) { 
         throw new Error(`Failed to parse lesson plan from API response. Content might not be valid JSON. ${error.message}`);
       }
-      if (error instanceof Error) { // Other errors
+      if (error instanceof Error) { 
         throw new Error(`Failed to generate lesson plan: ${error.message}`);
       }
       throw new Error("Failed to generate lesson plan due to an unknown error.");

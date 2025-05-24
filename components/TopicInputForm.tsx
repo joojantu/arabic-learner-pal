@@ -1,21 +1,89 @@
 
-import React, { useState } from 'react';
-import { SparklesIcon, LightBulbIcon } from './icons';
+import React, { useState, useRef } from 'react';
+import { SparklesIcon, LightBulbIcon, XMarkIcon } from './icons';
+import { UploadedFile } from '../types';
 
 interface TopicInputFormProps {
-  onSubmit: (topics: string) => void;
+  onSubmit: (topics: string, file?: UploadedFile) => void;
   isLoading: boolean;
 }
 
+const MAX_FILE_SIZE_MB = 5;
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+const ALLOWED_FILE_TYPES = [
+  "application/pdf",
+  "text/plain",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+];
+
 const TopicInputForm: React.FC<TopicInputFormProps> = ({ onSubmit, isLoading }) => {
   const [topics, setTopics] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFileError(null);
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        setFileError(`File is too large. Max size: ${MAX_FILE_SIZE_MB}MB.`);
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = ""; // Clear the input
+        return;
+      }
+      if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+        setFileError(`Invalid file type. Allowed: PDF, TXT, DOC, DOCX.`);
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = ""; // Clear the input
+        return;
+      }
+      setSelectedFile(file);
+    } else {
+      setSelectedFile(null);
+    }
+  };
+
+  const clearFile = () => {
+    setSelectedFile(null);
+    setFileError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""; // Resets the file input
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedTopics = topics.trim();
-    if (trimmedTopics) {
-      onSubmit(trimmedTopics);
+    
+    if (!trimmedTopics && !selectedFile) {
+      // Optionally, show an error or simply don't submit if both are empty
+      return;
     }
+
+    let uploadedFileData: UploadedFile | undefined = undefined;
+
+    if (selectedFile) {
+      try {
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]); // Get base64 part
+          reader.onerror = error => reject(error);
+          reader.readAsDataURL(selectedFile);
+        });
+        uploadedFileData = {
+          name: selectedFile.name,
+          mimeType: selectedFile.type,
+          base64Data: base64Data,
+        };
+      } catch (error) {
+        console.error("Error reading file:", error);
+        setFileError("Could not read the file. Please try again.");
+        return;
+      }
+    }
+    onSubmit(trimmedTopics, uploadedFileData);
   };
 
   return (
@@ -27,24 +95,65 @@ const TopicInputForm: React.FC<TopicInputFormProps> = ({ onSubmit, isLoading }) 
         </h1>
       </div>
       <p className="text-gray-600 mb-8 text-center text-md md:text-lg px-2">
-        What topics should this Arabic lesson cover for your child's upcoming test or learning goals?
+        What topics should this Arabic lesson cover? Type them below, or upload a file (e.g., PDF, DOCX, TXT) with sample material.
         <br />
-        For example: "Greetings and introductions, family members, numbers 1-20, common classroom objects."
+        Example topics: "Greetings, family, numbers 1-20, classroom objects."
       </p>
       <form onSubmit={handleSubmit} aria-labelledby="form-title">
-        <label htmlFor="topic-textarea" className="sr-only">Lesson topics</label>
-        <textarea
-          id="topic-textarea"
-          value={topics}
-          onChange={(e) => setTopics(e.target.value)}
-          placeholder="e.g., colors, animals, food items, telling time..."
-          className="w-full p-4 border border-gray-300 rounded-lg mb-6 focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow shadow-sm text-lg h-36 resize-y"
-          disabled={isLoading}
-          aria-required="true"
-        />
+        <div className="mb-6">
+          <label htmlFor="topic-textarea" className="block text-lg font-medium text-gray-700 mb-1">Lesson Topics (Optional)</label>
+          <textarea
+            id="topic-textarea"
+            value={topics}
+            onChange={(e) => setTopics(e.target.value)}
+            placeholder="e.g., colors, animals, food items..."
+            className="w-full p-4 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow shadow-sm text-lg h-28 resize-y"
+            disabled={isLoading}
+          />
+        </div>
+
+        <div className="mb-6">
+          <label htmlFor="file-upload" className="block text-lg font-medium text-gray-700 mb-1">Upload Material (Optional)</label>
+          <input
+            type="file"
+            id="file-upload"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            className="block w-full text-sm text-gray-500
+              file:mr-4 file:py-2 file:px-4
+              file:rounded-full file:border-0
+              file:text-sm file:font-semibold
+              file:bg-primary/10 file:text-primary
+              hover:file:bg-primary/20
+              disabled:opacity-60 disabled:cursor-not-allowed"
+            accept=".pdf,.txt,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,application/pdf"
+            disabled={isLoading}
+            aria-describedby="file-constraints"
+          />
+          <p id="file-constraints" className="mt-1 text-xs text-gray-500">
+            PDF, TXT, DOC, DOCX. Max {MAX_FILE_SIZE_MB}MB.
+          </p>
+          {fileError && <p className="mt-1 text-sm text-danger" role="alert">{fileError}</p>}
+        </div>
+
+        {selectedFile && !fileError && (
+          <div className="mb-6 p-3 bg-blue-50 rounded-lg flex justify-between items-center text-sm">
+            <span className="text-blue-700 truncate" title={selectedFile.name}>File: {selectedFile.name}</span>
+            <button
+              type="button"
+              onClick={clearFile}
+              className="p-1 text-red-500 hover:text-red-700 rounded-full hover:bg-red-100 disabled:opacity-50"
+              aria-label="Clear selected file"
+              disabled={isLoading}
+            >
+              <XMarkIcon className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
         <button
           type="submit"
-          disabled={isLoading || !topics.trim()}
+          disabled={isLoading || (!topics.trim() && !selectedFile) || !!fileError}
           className="w-full flex items-center justify-center bg-primary hover:bg-primary-darker text-white font-bold py-3.5 px-6 rounded-lg text-xl transition-all duration-150 ease-in-out disabled:opacity-60 disabled:cursor-not-allowed shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-70 active:transform active:scale-95"
         >
           {isLoading ? (

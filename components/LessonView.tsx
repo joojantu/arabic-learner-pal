@@ -1,8 +1,10 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { LessonPlan, VocabularyItem, PhraseItem } from '../types';
 import useTextToSpeech from '../hooks/useTextToSpeech';
-import { SpeakerIcon } from './icons';
+import useSpeechRecognition from '../hooks/useSpeechRecognition';
+import { SpeakerIcon, MicrophoneIcon } from './icons';
+import { calculateArabicSimilarity } from '../utils/textSimilarity';
 
 interface LessonViewProps {
   lessonPlan: LessonPlan;
@@ -12,45 +14,127 @@ interface LessonViewProps {
 const Flashcard: React.FC<{
   item: VocabularyItem | PhraseItem;
   onPlayAudio: (text: string) => void;
-  isSpeaking: boolean;
-  isSupported: boolean;
-}> = ({ item, onPlayAudio, isSpeaking, isSupported }) => {
+  isTextSpeaking: boolean;
+  isTextToSpeechSupported: boolean;
+}> = ({ item, onPlayAudio, isTextSpeaking, isTextToSpeechSupported }) => {
+  const {
+    isListening: isSpeechRecListening,
+    transcript: speechRecTranscript,
+    interimTranscript: speechRecInterimTranscript,
+    error: speechRecError,
+    isSupported: isSpeechRecSupported,
+    startListening: startSpeechRecListening,
+    stopListening: stopSpeechRecListening,
+    resetTranscript: resetSpeechRecTranscript,
+  } = useSpeechRecognition();
+
+  const [attemptScore, setAttemptScore] = useState<number | null>(null);
+  const [finalUserAttempt, setFinalUserAttempt] = useState<string>('');
+
   const handlePlayAudio = (e: React.MouseEvent<HTMLButtonElement>) => {
-    e.stopPropagation(); // Prevent card click if clicking button
+    e.stopPropagation();
+    if (isSpeechRecListening) stopSpeechRecListening(); // Stop mic if TTS is played
     onPlayAudio(item.audioSrc);
   };
 
+  const handleMicClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (isTextSpeaking) { // If TTS is speaking, stop it before starting mic
+        // This requires the TTS cancel function to be passed down or accessible
+        // For now, we assume TTS would stop on its own or the user waits
+    }
+    if (isSpeechRecListening) {
+      stopSpeechRecListening();
+    } else {
+      resetSpeechRecTranscript();
+      setAttemptScore(null);
+      setFinalUserAttempt('');
+      startSpeechRecListening('ar-SA'); // Using 'ar-SA' as a common Arabic locale
+    }
+  };
+
+  useEffect(() => {
+    if (!isSpeechRecListening && speechRecTranscript) {
+      // Only calculate score when listening stops and there's a final transcript
+      setFinalUserAttempt(speechRecTranscript);
+      const score = calculateArabicSimilarity(item.arabic, speechRecTranscript);
+      setAttemptScore(score);
+    }
+  }, [isSpeechRecListening, speechRecTranscript, item.arabic]);
+  
+  // Reset speech recognition state if item changes
+  useEffect(() => {
+    resetSpeechRecTranscript();
+    setAttemptScore(null);
+    setFinalUserAttempt('');
+    if(isSpeechRecListening) stopSpeechRecListening();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item]);
+
+
   return (
-    <div className="bg-white p-4 sm:p-5 rounded-xl shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:ring-2 hover:ring-primary/50 transform hover:-translate-y-1 flex flex-col justify-between min-h-[160px]">
+    <div className="bg-white p-4 sm:p-5 rounded-xl shadow-lg transition-all duration-300 ease-in-out hover:shadow-xl hover:ring-2 hover:ring-primary/50 transform hover:-translate-y-1 flex flex-col justify-between min-h-[200px]">
       <div>
         <div className="flex justify-between items-start mb-2">
           <h3 className="text-2xl sm:text-3xl font-bold text-primary rtl break-words" lang="ar" dir="rtl">{item.arabic}</h3>
-          {isSupported && (
-            <button
-              onClick={handlePlayAudio}
-              disabled={isSpeaking}
-              className="p-2 rounded-full text-primary hover:bg-blue-100 focus:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label={`Play audio for ${item.arabic}`}
-            >
-              <SpeakerIcon className="w-6 h-6 sm:w-7 sm:h-7" />
-            </button>
-          )}
+          <div className="flex space-x-1">
+            {isTextToSpeechSupported && (
+              <button
+                onClick={handlePlayAudio}
+                disabled={isTextSpeaking}
+                className="p-2 rounded-full text-primary hover:bg-blue-100 focus:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={`Play audio for ${item.arabic}`}
+              >
+                <SpeakerIcon className="w-6 h-6 sm:w-7 sm:h-7" />
+              </button>
+            )}
+            {isSpeechRecSupported && (
+              <button
+                onClick={handleMicClick}
+                disabled={isTextSpeaking} // Disable mic if TTS is active
+                className={`p-2 rounded-full hover:bg-blue-100 focus:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed ${isSpeechRecListening ? 'text-red-500 animate-pulseRing' : 'text-primary'}`}
+                aria-label={isSpeechRecListening ? 'Stop listening' : `Speak ${item.arabic}`}
+              >
+                <MicrophoneIcon className="w-6 h-6 sm:w-7 sm:h-7" />
+              </button>
+            )}
+          </div>
         </div>
         <p className="text-lg sm:text-xl text-gray-700 break-words">{item.english}</p>
       </div>
       <p className="text-md sm:text-lg text-secondary-darker font-semibold mt-2 break-words">{item.transliteration}</p>
+      
+      {isSpeechRecSupported && (
+        <div className="mt-3 pt-3 border-t border-gray-200 text-sm">
+          {isSpeechRecListening && (
+            <p className="text-blue-600 italic">Listening... Say: "{item.arabic}"</p>
+          )}
+          {speechRecInterimTranscript && <p className="text-gray-500 rtl" lang="ar" dir="rtl"><em>Interim: {speechRecInterimTranscript}</em></p>}
+          {finalUserAttempt && !isSpeechRecListening && (
+            <p className="text-gray-700 rtl font-medium" lang="ar" dir="rtl">Your attempt: {finalUserAttempt}</p>
+          )}
+          {attemptScore !== null && !isSpeechRecListening && (
+             <p className={`font-semibold ${attemptScore >= 75 ? 'text-green-600' : attemptScore >=50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                Score: {attemptScore}%
+              </p>
+          )}
+          {speechRecError && <p className="text-danger text-xs mt-1">{speechRecError}</p>}
+        </div>
+      )}
+       {!isSpeechRecSupported && (
+        <p className="text-xs text-yellow-700 bg-yellow-50 p-1 rounded mt-2">Speech practice unavailable: microphone input not supported by your browser.</p>
+      )}
     </div>
   );
 };
 
 
 const LessonView: React.FC<LessonViewProps> = ({ lessonPlan, onStartQuiz }) => {
-  const { speak, isSpeaking, isSupported, availableArabicVoice, cancel } = useTextToSpeech();
+  const { speak, isSpeaking: isTextSpeaking, isSupported: isTextToSpeechSupported, availableArabicVoice, cancel } = useTextToSpeech();
 
-  // Cancel any ongoing speech when the component unmounts or lessonPlan changes
-  React.useEffect(() => {
+  useEffect(() => {
     return () => {
-      cancel();
+      cancel(); // Cancel TTS
     };
   }, [cancel, lessonPlan]);
 
@@ -61,12 +145,12 @@ const LessonView: React.FC<LessonViewProps> = ({ lessonPlan, onStartQuiz }) => {
         {lessonPlan.title}
       </h1>
       
-      {!isSupported && (
+      {!isTextToSpeechSupported && (
         <p className="text-center text-sm text-red-700 bg-red-100 p-3 rounded-md mb-6 shadow">
           Text-to-speech is not supported in your browser. Audio features will be unavailable.
         </p>
       )}
-      {isSupported && !availableArabicVoice && (
+      {isTextToSpeechSupported && !availableArabicVoice && (
          <p className="text-center text-sm text-yellow-700 bg-yellow-100 p-3 rounded-md mb-6 shadow">
           An Arabic voice for text-to-speech was not found in your browser. Speech might use a default voice or may not work correctly for Arabic.
         </p>
@@ -83,8 +167,8 @@ const LessonView: React.FC<LessonViewProps> = ({ lessonPlan, onStartQuiz }) => {
                 key={`vocab-${index}-${item.arabic}`} 
                 item={item} 
                 onPlayAudio={speak} 
-                isSpeaking={isSpeaking}
-                isSupported={isSupported} 
+                isTextSpeaking={isTextSpeaking}
+                isTextToSpeechSupported={isTextToSpeechSupported}
               />
             ))}
           </div>
@@ -104,8 +188,8 @@ const LessonView: React.FC<LessonViewProps> = ({ lessonPlan, onStartQuiz }) => {
                 key={`phrase-${index}-${item.arabic}`} 
                 item={item} 
                 onPlayAudio={speak} 
-                isSpeaking={isSpeaking}
-                isSupported={isSupported}
+                isTextSpeaking={isTextSpeaking}
+                isTextToSpeechSupported={isTextToSpeechSupported}
               />
             ))}
           </div>
@@ -131,6 +215,14 @@ const LessonView: React.FC<LessonViewProps> = ({ lessonPlan, onStartQuiz }) => {
         @keyframes fadeIn {
           from { opacity: 0; transform: translateY(10px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-pulseRing {
+          animation: pulseRing 1.5s infinite;
+        }
+        @keyframes pulseRing {
+          0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } /* theme danger */
+          70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
       ` }} />
     </div>

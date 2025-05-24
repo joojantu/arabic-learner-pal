@@ -73,3 +73,10 @@ export interface GroundingChunk {
 export interface GroundingMetadata {
   groundingChunks?: GroundingChunk[];
 }
+
+// Interface for file data to be sent to Gemini service
+export interface UploadedFile {
+  name: string;
+  mimeType: string;
+  base64Data: string;
+}
