@@ -9,7 +9,7 @@ import { GEMINI_MODEL_NAME, MISSING_API_KEY_MSG } from '../constants';
 // A "SyntaxError: Missing initializer in const declaration" on this line implies that 'process.env.API_KEY'
 // is being improperly substituted by a build tool or pre-processor, resulting in syntactically invalid code
 // (e.g., 'const API_KEY = ;'). This would be an environmental issue.
-const API_KEY = process.env.API_KEY;
+const API_KEY = process.env.API_KEY || '';
 
 let ai: GoogleGenAI | null = null;
 
